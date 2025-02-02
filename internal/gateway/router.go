@@ -42,9 +42,14 @@ func (r *Router) HandleRequest(w http.ResponseWriter, req *http.Request) {
 	log.Printf("Request received: %s %s", req.Method, req.URL.Path)
 
 	for _, route := range r.Config.Aggregations {
-		match, params := matchRoute(req.URL.Path, route.Path)
+		match, pathParams := matchRoute(req.URL.Path, route.Path)
 		if match {
-			response := r.Aggregator.AggregateData(route, params)
+			queryParams := extractQueryParams(req)
+			headerParams := extractHeaderParams(req)
+
+			allParams := mergeParams(pathParams, queryParams, headerParams)
+
+			response := r.Aggregator.AggregateData(route, allParams, req)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(response)
 			return

@@ -17,9 +17,10 @@ type Aggregation struct {
 }
 
 type Call struct {
-	Name     string `yaml:"name"`
-	Backend  string `yaml:"backend"`
-	Required bool   `yaml:"required,omitempty"`
+	Name     string            `yaml:"name"`
+	Backend  string            `yaml:"backend"`
+	Required bool              `yaml:"required,omitempty"`
+	Params   map[string]string `yaml:"params,omitempty"`
 }
 
 type Mapping struct {
