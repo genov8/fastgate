@@ -9,17 +9,20 @@ import (
 )
 
 type Router struct {
-	Config *config.Config
+	Config     *config.Config
+	Aggregator *Aggregator
 }
 
 func NewRouter(cfg *config.Config) *Router {
-	return &Router{Config: cfg}
+	return &Router{
+		Config:     cfg,
+		Aggregator: NewAggregator(cfg),
+	}
 }
 
 func matchRoute(path, pattern string) (bool, map[string]string) {
 	rePattern := regexp.MustCompile(`\{(\w+)\}`)
 	paramNames := rePattern.FindAllStringSubmatch(pattern, -1)
-
 	regexStr := rePattern.ReplaceAllString(pattern, `([^/]+)`)
 	regex := regexp.MustCompile("^" + regexStr + "$")
 
@@ -41,11 +44,7 @@ func (r *Router) HandleRequest(w http.ResponseWriter, req *http.Request) {
 	for _, route := range r.Config.Aggregations {
 		match, params := matchRoute(req.URL.Path, route.Path)
 		if match {
-			response := map[string]interface{}{
-				"message": "🚀 API Gateway works!",
-				"path":    route.Path,
-				"params":  params,
-			}
+			response := r.Aggregator.AggregateData(route, params)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(response)
 			return
