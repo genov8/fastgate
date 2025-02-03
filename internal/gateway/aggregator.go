@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"fastgate/internal/config"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -24,10 +25,16 @@ func (a *Aggregator) fetchData(call config.Call, url string, wg *sync.WaitGroup,
 
 	resp, err := http.Get(url)
 	if err != nil {
-		log.Printf("Request error to %s: %v", call.Name, err)
-		if call.Required {
-			resultChan <- map[string]interface{}{"__error__": call.Name}
-		} else {
+		log.Printf("Error requesting %s (%s): %v", call.Name, url, err)
+		resultChan <- map[string]interface{}{
+			"__error__": map[string]interface{}{
+				"service":  call.Name,
+				"error":    "Service unavailable",
+				"critical": call.Required,
+			},
+		}
+
+		if !call.Required {
 			resultChan <- map[string]interface{}{call.Name: nil}
 		}
 		return
@@ -37,9 +44,15 @@ func (a *Aggregator) fetchData(call config.Call, url string, wg *sync.WaitGroup,
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Printf("Error reading response from %s: %v", call.Name, err)
-		if call.Required {
-			resultChan <- map[string]interface{}{"__error__": call.Name}
-		} else {
+		resultChan <- map[string]interface{}{
+			"__error__": map[string]interface{}{
+				"service":  call.Name,
+				"error":    "Invalid response from service",
+				"critical": call.Required,
+			},
+		}
+
+		if !call.Required {
 			resultChan <- map[string]interface{}{call.Name: nil}
 		}
 		return
@@ -48,9 +61,15 @@ func (a *Aggregator) fetchData(call config.Call, url string, wg *sync.WaitGroup,
 	var jsonData interface{}
 	if err := json.Unmarshal(body, &jsonData); err != nil {
 		log.Printf("Error parsing JSON from %s: %v", call.Name, err)
-		if call.Required {
-			resultChan <- map[string]interface{}{"__error__": call.Name}
-		} else {
+		resultChan <- map[string]interface{}{
+			"__error__": map[string]interface{}{
+				"service":  call.Name,
+				"error":    "Invalid JSON response",
+				"critical": call.Required,
+			},
+		}
+
+		if !call.Required {
 			resultChan <- map[string]interface{}{call.Name: nil}
 		}
 		return
@@ -67,19 +86,21 @@ func (a *Aggregator) AggregateData(route config.Aggregation, pathParams map[stri
 	queryParams := extractQueryParams(req)
 	headerParams := extractHeaderParams(req)
 
+	errors := make([]map[string]interface{}, 0)
+
 	for _, call := range route.Calls {
 		wg.Add(1)
 
 		allParams := mergeParams(pathParams, queryParams, headerParams)
-
 		resolvedParams := resolveParams(call, pathParams, queryParams, headerParams)
 		for key, value := range resolvedParams {
 			allParams[key] = value
 		}
 
-		missingParam := false
-		rePattern := regexp.MustCompile(`\{(\w+)\}`)
 		url := call.Backend
+		rePattern := regexp.MustCompile(`\{(\w+)\}`)
+		missingParam := false
+		missingParamName := ""
 
 		url = rePattern.ReplaceAllStringFunc(url, func(match string) string {
 			paramName := match[1 : len(match)-1]
@@ -87,13 +108,23 @@ func (a *Aggregator) AggregateData(route config.Aggregation, pathParams map[stri
 				return val
 			}
 			missingParam = true
+			missingParamName = paramName
 			return ""
 		})
 
 		if missingParam {
-			log.Printf("Skipping call to %s due to missing required parameters", call.Name)
-			wg.Done() // Завершаем горутину без выполнения запроса
-			resultChan <- map[string]interface{}{call.Name: nil}
+			log.Printf("⚠️ Missing parameter '%s' for service '%s'.", missingParamName, call.Name)
+			wg.Done()
+
+			errors = append(errors, map[string]interface{}{
+				"service":  call.Name,
+				"error":    fmt.Sprintf("Missing required parameter: %s", missingParamName),
+				"critical": call.Required,
+			})
+
+			if !call.Required {
+				resultChan <- map[string]interface{}{call.Name: nil}
+			}
 			continue
 		}
 
@@ -104,10 +135,22 @@ func (a *Aggregator) AggregateData(route config.Aggregation, pathParams map[stri
 	close(resultChan)
 
 	finalResponse := make(map[string]interface{})
+
 	for result := range resultChan {
-		for key, value := range result {
-			finalResponse[key] = value
+		if errData, exists := result["__error__"]; exists {
+			errors = append(errors, errData.(map[string]interface{}))
+			continue
 		}
+
+		for key, value := range result {
+			if key != "__error__" {
+				finalResponse[key] = value
+			}
+		}
+	}
+
+	if len(errors) > 0 {
+		finalResponse["error"] = errors
 	}
 
 	return finalResponse
