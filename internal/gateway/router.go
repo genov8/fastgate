@@ -20,22 +20,8 @@ func NewRouter(cfg *config.Config) *Router {
 	}
 }
 
-func matchRoute(path, pattern string) (bool, map[string]string) {
-	rePattern := regexp.MustCompile(`\{(\w+)\}`)
-	paramNames := rePattern.FindAllStringSubmatch(pattern, -1)
-	regexStr := rePattern.ReplaceAllString(pattern, `([^/]+)`)
-	regex := regexp.MustCompile("^" + regexStr + "$")
-
-	matches := regex.FindStringSubmatch(path)
-	if matches == nil {
-		return false, nil
-	}
-
-	params := make(map[string]string)
-	for i, param := range paramNames {
-		params[param[1]] = matches[i+1]
-	}
-	return true, params
+func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	r.HandleRequest(w, req)
 }
 
 func (r *Router) HandleRequest(w http.ResponseWriter, req *http.Request) {
@@ -57,4 +43,22 @@ func (r *Router) HandleRequest(w http.ResponseWriter, req *http.Request) {
 	}
 
 	http.NotFound(w, req)
+}
+
+func matchRoute(path, pattern string) (bool, map[string]string) {
+	rePattern := regexp.MustCompile(`\{(\w+)\}`)
+	paramNames := rePattern.FindAllStringSubmatch(pattern, -1)
+	regexStr := rePattern.ReplaceAllString(pattern, `([^/]+)`)
+	regex := regexp.MustCompile("^" + regexStr + "$")
+
+	matches := regex.FindStringSubmatch(path)
+	if matches == nil {
+		return false, nil
+	}
+
+	params := make(map[string]string)
+	for i, param := range paramNames {
+		params[param[1]] = matches[i+1]
+	}
+	return true, params
 }
