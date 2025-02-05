@@ -9,8 +9,9 @@ import (
 )
 
 type Router struct {
-	Config     *config.Config
-	Aggregator *Aggregator
+	Config      *config.Config
+	Aggregator  *Aggregator
+	RateLimiter *RateLimiter
 }
 
 func NewRouter(cfg *config.Config) *Router {
@@ -34,6 +35,17 @@ func (r *Router) HandleRequest(w http.ResponseWriter, req *http.Request) {
 			headerParams := extractHeaderParams(req)
 
 			allParams := mergeParams(pathParams, queryParams, headerParams)
+
+			if route.RateLimit.Limit > 0 && route.RateLimit.Interval > 0 {
+				key := route.Path
+				allowed := r.RateLimiter.AllowRequest(key, route.RateLimit.Limit, route.RateLimit.Interval)
+
+				if !allowed {
+					log.Printf("Rate limit exceeded for %s", key)
+					http.Error(w, "429 - Too Many Requests", http.StatusTooManyRequests)
+					return
+				}
+			}
 
 			response := r.Aggregator.AggregateData(route, allParams, req)
 			w.Header().Set("Content-Type", "application/json")
