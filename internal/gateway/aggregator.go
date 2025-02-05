@@ -113,7 +113,7 @@ func (a *Aggregator) AggregateData(route config.Aggregation, pathParams map[stri
 		})
 
 		if missingParam {
-			log.Printf("⚠️ Missing parameter '%s' for service '%s'.", missingParamName, call.Name)
+			log.Printf("Missing parameter '%s' for service '%s'.", missingParamName, call.Name)
 			wg.Done()
 
 			errors = append(errors, map[string]interface{}{
@@ -143,14 +143,20 @@ func (a *Aggregator) AggregateData(route config.Aggregation, pathParams map[stri
 		}
 
 		for key, value := range result {
-			if key != "__error__" {
-				finalResponse[key] = value
+			mappedKey := key
+			if mapped, exists := route.Response.Structure[key]; exists {
+				mappedKey = mapped
 			}
+			finalResponse[mappedKey] = value
 		}
 	}
 
 	if len(errors) > 0 {
-		finalResponse["error"] = errors
+		errorKey := "error"
+		if mappedErrorKey, exists := route.Response.Structure["error"]; exists {
+			errorKey = mappedErrorKey
+		}
+		finalResponse[errorKey] = errors
 	}
 
 	return finalResponse
